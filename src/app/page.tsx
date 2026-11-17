@@ -39,21 +39,21 @@ export default function HomePage() {
 
         <div className="mt-7 flex flex-wrap gap-3">
           <Link
-            href="/session/demo"
+            href="/parse"
             className="px-5 py-2.5 rounded-lg bg-blue-600 text-white font-medium hover:bg-blue-700 transition"
           >
-            用示例简历试试
+            粘贴简历，试试解析
           </Link>
           <Link
-            href="/report/demo"
+            href="/session/demo"
             className="px-5 py-2.5 rounded-lg border border-slate-300 dark:border-slate-600 hover:bg-white dark:hover:bg-slate-800 transition"
           >
-            看一眼报告长什么样
+            看一眼做题页
           </Link>
         </div>
 
         <p className="mt-4 text-xs text-slate-400">
-          当前版本是骨架：页面与路由已就位，核心能力在开发中。
+          简历解析已可用（W1）；做题与复盘报告还在开发中。
         </p>
       </section>
 

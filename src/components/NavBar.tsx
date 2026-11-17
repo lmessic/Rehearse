@@ -15,12 +15,12 @@ export default function NavBar() {
           <Link href="/" className="hover:text-blue-600">
             首页
           </Link>
+          <Link href="/parse" className="hover:text-blue-600">
+            简历解析
+          </Link>
           <Link href="/session/demo" className="hover:text-blue-600">
             开始练习
           </Link>
-          <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-700 text-xs dark:bg-amber-900/40 dark:text-amber-300">
-            开发中
-          </span>
         </div>
       </div>
     </nav>
