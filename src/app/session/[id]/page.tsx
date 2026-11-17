@@ -45,7 +45,8 @@ function SessionBody() {
           第 1 / 5 题 · 来自「AI 智能申请售后」
         </p>
         <p className="font-medium leading-relaxed">
-          你在京东售后做的 AI 智能申请，用户从说话到提交售后单，中间经过哪些步骤？
+          你在京东售后做的 AI
+          智能申请，用户从说话到提交售后单，中间经过哪些步骤？
         </p>
       </section>
 

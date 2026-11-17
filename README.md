@@ -54,17 +54,33 @@ src/
 
 ## 本地运行
 
-前置：Node.js >= 20
+前置：Node.js >= 20，以及一个 DeepSeek API Key
 
 ```bash
-# 安装依赖
+# 1. 安装依赖
 npm install
 
-# 启动开发服务器
+# 2. 配置环境变量（复制模板后填入你的 key）
+#    Windows PowerShell: Copy-Item .env.example .env.local
+cp .env.example .env.local
+
+# 3. 启动开发服务器
 npm run dev
 ```
 
 打开 http://localhost:3000
+
+### 环境变量
+
+| 变量 | 必填 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `DEEPSEEK_API_KEY` | ✅ | — | 模型密钥，**只在服务端使用** |
+| `DEEPSEEK_BASE_URL` | | `https://api.deepseek.com` | OpenAI 兼容地址 |
+| `DEEPSEEK_MODEL` | | `deepseek-chat` | 使用 `deepseek-chat`，不涉及推理模型 |
+| `MAX_RESUME_CHARS` | | `8000` | 简历文本上限，超出会截断并标记 |
+
+> 密钥没有 `NEXT_PUBLIC_` 前缀，因此不会被打进前端产物。
+> 构建阶段不需要真实密钥，只有真正调用接口时才会校验。
 
 ```bash
 # 生产构建
