@@ -28,10 +28,14 @@ export type RiskLevel = z.infer<typeof RiskLevelSchema>;
 export type ResumePoint = z.infer<typeof ResumePointSchema>;
 export type ParseResult = z.infer<typeof ParseResultSchema>;
 
+/** 简历正文的最小长度：低于这个值抽不出有意义的项目点 */
+export const MIN_RESUME_CHARS = 80;
+
 /** 接口统一的错误体，前端按 code 决定提示文案 */
 export type ApiErrorCode =
   | "BAD_REQUEST"
   | "CONFIG_MISSING"
+  | "CONFIG_INVALID"
   | "UPSTREAM_TIMEOUT"
   | "UPSTREAM_ERROR"
   | "INVALID_JSON";

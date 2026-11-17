@@ -2,7 +2,11 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { env } from "@/lib/env";
 import { chatJson, LlmError } from "@/lib/llm";
-import { ParseResultSchema, type ApiErrorBody } from "@/lib/schemas";
+import {
+  MIN_RESUME_CHARS,
+  ParseResultSchema,
+  type ApiErrorBody,
+} from "@/lib/schemas";
 import { buildParseUserPrompt, PARSE_SYSTEM_PROMPT } from "@/lib/prompts";
 
 /**
@@ -12,42 +16,72 @@ import { buildParseUserPrompt, PARSE_SYSTEM_PROMPT } from "@/lib/prompts";
  * 响应：{ points, truncated }
  *
  * 失败语义（前端按 code 决定提示文案）：
- *   400 BAD_REQUEST      —— 请求体不合法或文本过短
+ *   400 BAD_REQUEST      —— 请求体不是 JSON，或 text 缺失/过短
  *   500 CONFIG_MISSING   —— 服务端没配 DEEPSEEK_API_KEY
+ *   500 CONFIG_INVALID   —— 密钥无效（401/403）
  *   504 UPSTREAM_TIMEOUT —— 模型超时
  *   502 UPSTREAM_ERROR   —— 模型报错 / 输出不合法
  */
 
 const RequestSchema = z.object({
-  // 太短的文本（< 80 字）解析不出东西，直接拦掉省一次调用
-  text: z.string().min(80, "简历内容太短，无法解析"),
+  text: z.string(),
 });
 
-function fail(status: number, code: ApiErrorBody["error"]["code"], message: string) {
+function fail(
+  status: number,
+  code: ApiErrorBody["error"]["code"],
+  message: string,
+) {
   return NextResponse.json<ApiErrorBody>({ error: { code, message } }, { status });
 }
 
 export async function POST(request: Request) {
   const startedAt = Date.now();
 
+  // ---- 1. 请求体解析 ----
   let body: unknown;
   try {
     body = await request.json();
   } catch {
-    return fail(400, "BAD_REQUEST", "请求体不是合法 JSON");
+    const contentType = request.headers.get("content-type") ?? "(未设置)";
+    console.warn(`[parse] bad-request reason=json-parse content-type=${contentType}`);
+    return fail(
+      400,
+      "BAD_REQUEST",
+      '请求体不是合法 JSON。请用 Content-Type: application/json 发送 {"text": "简历全文"}',
+    );
   }
 
   const parsed = RequestSchema.safeParse(body);
   if (!parsed.success) {
-    const first = parsed.error.issues[0];
-    return fail(400, "BAD_REQUEST", first?.message ?? "请求参数不合法");
+    console.warn(`[parse] bad-request reason=missing-text`);
+    return fail(
+      400,
+      "BAD_REQUEST",
+      '缺少 text 字段。请求体应为 {"text": "简历全文"}',
+    );
   }
 
-  const maxChars = env.maxResumeChars;
-  const original = parsed.data.text;
-  const truncated = original.length > maxChars;
-  const resumeText = truncated ? original.slice(0, maxChars) : original;
+  // ---- 2. 长度校验（提示里带上实际长度，便于排查） ----
+  const raw = parsed.data.text;
+  const trimmedLength = raw.trim().length;
+  if (trimmedLength < MIN_RESUME_CHARS) {
+    console.warn(
+      `[parse] bad-request reason=too-short len=${trimmedLength} min=${MIN_RESUME_CHARS}`,
+    );
+    return fail(
+      400,
+      "BAD_REQUEST",
+      `简历内容太短：当前 ${trimmedLength} 个字符，至少需要 ${MIN_RESUME_CHARS} 个`,
+    );
+  }
 
+  // ---- 3. 截断 ----
+  const maxChars = env.maxResumeChars;
+  const truncated = raw.length > maxChars;
+  const resumeText = truncated ? raw.slice(0, maxChars) : raw;
+
+  // ---- 4. 调用模型 ----
   try {
     const result = await chatJson({
       system: PARSE_SYSTEM_PROMPT,
@@ -78,7 +112,13 @@ export async function POST(request: Request) {
 
     switch (llmError.code) {
       case "CONFIG_MISSING":
-        return fail(500, "CONFIG_MISSING", "服务端未配置模型密钥，请联系管理员");
+        return fail(500, "CONFIG_MISSING", "服务端未配置模型密钥，请在 .env.local 填写 DEEPSEEK_API_KEY");
+      case "CONFIG_INVALID":
+        return fail(
+          500,
+          "CONFIG_INVALID",
+          "模型密钥无效：请确认 DEEPSEEK_API_KEY 是 DeepSeek 平台的 sk- 开头密钥",
+        );
       case "UPSTREAM_TIMEOUT":
         return fail(504, "UPSTREAM_TIMEOUT", "模型响应超时，请稍后重试");
       case "INVALID_JSON":

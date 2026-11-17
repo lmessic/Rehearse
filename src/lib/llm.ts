@@ -13,6 +13,7 @@ import { env, MissingEnvError } from "./env";
 
 export type LlmErrorCode =
   | "CONFIG_MISSING"
+  | "CONFIG_INVALID"
   | "UPSTREAM_TIMEOUT"
   | "UPSTREAM_ERROR"
   | "INVALID_JSON";
@@ -82,6 +83,14 @@ async function callOnce<T>(
 
   const url = `${env.deepseekBaseUrl.replace(/\/+$/, "")}/chat/completions`;
 
+  // 快速的格式体检：DeepSeek 的密钥以 sk- 开头。
+  // 不符合时只告警不拦截——万一以后换成别家兼容服务，不至于直接不能用。
+  if (!apiKey.startsWith("sk-")) {
+    console.warn(
+      `[llm] DEEPSEEK_API_KEY 不以 sk- 开头（长度 ${apiKey.length}），可能不是 DeepSeek 平台的密钥`,
+    );
+  }
+
   let response: Response;
   try {
     response = await fetch(url, {
@@ -115,6 +124,15 @@ async function callOnce<T>(
 
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
+
+    // 401/403 是密钥问题，不是「服务暂时不可用」——重试没有意义，提示也要说清楚
+    if (response.status === 401 || response.status === 403) {
+      throw new LlmError(
+        "CONFIG_INVALID",
+        `模型鉴权失败（${response.status}）：${detail.slice(0, 200)}`,
+      );
+    }
+
     throw new LlmError(
       "UPSTREAM_ERROR",
       `模型返回 ${response.status}：${detail.slice(0, 200)}`,
