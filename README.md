@@ -82,6 +82,46 @@ npm run dev
 > 密钥没有 `NEXT_PUBLIC_` 前缀，因此不会被打进前端产物。
 > 构建阶段不需要真实密钥，只有真正调用接口时才会校验。
 
+### 密钥安全
+
+**本地开发**：写在 `.env.local`（已被 `.gitignore` 的 `.env*` 规则忽略，从未进入过 git 历史）。
+
+**生产环境**：用服务器上的环境变量，不要把 `.env.production` 打进镜像。
+
+| 方式 | 说明 | 推荐度 |
+| --- | --- | --- |
+| 平台 Secrets / KMS | 云厂商凭据管理、部署平台的环境变量面板 | ⭐⭐⭐ |
+| `docker compose` 的 `env_file` | 文件在服务器上、`chmod 600`、不进 git 不进镜像 | ⭐⭐ |
+| 宿主机环境变量注入 | `environment: DEEPSEEK_API_KEY=${...}` | ⭐⭐ |
+| 写进 `Dockerfile` 的 `ENV` | 会固化在镜像层，`docker history` 可见 | ❌ |
+| 提交到 git | 删掉也在历史里 | ❌ |
+
+**提交前自检**：
+
+```bash
+npm run check:secrets
+```
+
+扫描已跟踪文件里的密钥特征（DeepSeek / OpenAI、AWS、GitHub Token、硬编码赋值），命中会打码输出位置。
+
+建议装成 pre-commit 钩子，在提交前拦一道：
+
+```bash
+cp scripts/check-secrets.mjs .git/hooks/pre-commit
+chmod +x .git/hooks/pre-commit
+```
+
+> Windows 下钩子需要能被 Git Bash 执行；也可以直接放在 CI 里跑。
+
+**泄露应急流程**（顺序不能反）：
+
+1. 先到控制台**吊销**旧密钥
+2. 生成新密钥
+3. 更新服务器环境变量并重启
+4. 查账单有无异常消耗
+
+**额外建议**：在 DeepSeek 控制台设置**花费上限**——即使密钥泄露，损失也有上限，这比任何代码层面的防护都直接。
+
 ```bash
 # 生产构建
 npm run build

@@ -40,7 +40,8 @@ const RISK_LABEL: Record<string, string> = {
 
 const ERROR_HINT: Record<string, string> = {
   BAD_REQUEST: "请求内容有问题，看上面的具体说明。",
-  CONFIG_MISSING: "在项目根目录的 .env.local 里填写 DEEPSEEK_API_KEY，然后重启 dev server。",
+  CONFIG_MISSING:
+    "在项目根目录的 .env.local 里填写 DEEPSEEK_API_KEY，然后重启 dev server。",
   CONFIG_INVALID:
     "当前密钥无效。DeepSeek 的密钥必须以 sk- 开头，请到 platform.deepseek.com 重新生成，改完记得重启。",
   UPSTREAM_TIMEOUT: "模型响应超时，稍后重试即可。",
@@ -116,9 +117,7 @@ export default function ParsePanel() {
   async function handleCopy() {
     if (!result) return;
     try {
-      await navigator.clipboard.writeText(
-        JSON.stringify(result, null, 2),
-      );
+      await navigator.clipboard.writeText(JSON.stringify(result, null, 2));
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
@@ -137,7 +136,9 @@ export default function ParsePanel() {
           <div className="flex items-center gap-3">
             <span
               className={`text-xs ${
-                tooShort ? "text-amber-600 dark:text-amber-400" : "text-slate-400"
+                tooShort
+                  ? "text-amber-600 dark:text-amber-400"
+                  : "text-slate-400"
               }`}
             >
               {lengthHint}
@@ -209,7 +210,9 @@ export default function ParsePanel() {
               {error.code}
             </code>
           </div>
-          <p className="text-sm text-rose-800 dark:text-rose-200">{error.message}</p>
+          <p className="text-sm text-rose-800 dark:text-rose-200">
+            {error.message}
+          </p>
           {ERROR_HINT[error.code] && (
             <p className="mt-2 text-sm text-rose-700/80 dark:text-rose-300/80">
               {ERROR_HINT[error.code]}
