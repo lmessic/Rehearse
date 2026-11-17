@@ -1,5 +1,5 @@
 // 环形缓存，写满后覆盖最旧元素
-class RingBuffer<T> {
+export class RingBuffer<T> {
   // 存储实际数据
   private buf: (T | undefined)[];
   // 写指针，永远指向下一个被写入的数组索引位置

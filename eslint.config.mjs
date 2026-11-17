@@ -13,6 +13,16 @@ const eslintConfig = defineConfig([
     "build/**",
     "next-env.d.ts",
   ]),
+  {
+    // src/utils 是手写练习代码，刻意模仿原生实现（bind / call / apply / 深拷贝），
+    // 因此保留 any、this 别名与 arguments 的写法。这不影响应用代码的规则。
+    files: ["src/utils/**/*.ts"],
+    rules: {
+      "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/no-this-alias": "off",
+      "prefer-rest-params": "off",
+    },
+  },
 ]);
 
 export default eslintConfig;

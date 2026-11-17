@@ -1,5 +1,5 @@
 // 手写bind
-function MyBind(context: any, ...args: any) {
+export function MyBind(this: any, context: any, ...args: any) {
   if (typeof this !== "function") {
     throw new Error("this is not a function");
   }
@@ -7,7 +7,7 @@ function MyBind(context: any, ...args: any) {
   context = context || window;
   const self = this;
 
-  return function Fn() {
+  return function Fn(this: any) {
     if (this instanceof Fn) {
       return new self(...args, ...arguments);
     }
@@ -17,13 +17,13 @@ function MyBind(context: any, ...args: any) {
 }
 
 // 手写call
-function MyCall(context: any, ...args: any) {
+export function MyCall(this: any, context: any, ...args: any) {
   if (typeof this !== "function") {
     throw new Error("this is not a function");
   }
 
   context = context || window;
-  let fn = Symbol("fn");
+  const fn = Symbol("fn");
   context[fn] = this;
 
   const result = context[fn](...args[1]);
@@ -33,13 +33,13 @@ function MyCall(context: any, ...args: any) {
 }
 
 // 手写apply
-function MyApply(context: any, args?: any) {
+export function MyApply(this: any, context: any, args?: any) {
   if (typeof this !== "function") {
     throw new Error("this is not a function");
   }
 
   context = context || window;
-  let fn = Symbol("fn");
+  const fn = Symbol("fn");
 
   context[fn] = this;
 
@@ -50,7 +50,7 @@ function MyApply(context: any, args?: any) {
 }
 
 // 深拷贝
-function deepClone(obj: any, hash = new WeakMap()): any {
+export function deepClone(obj: any, hash = new WeakMap()): any {
   if (typeof obj !== "object" || obj === null) {
     return obj;
   }
@@ -62,9 +62,9 @@ function deepClone(obj: any, hash = new WeakMap()): any {
     hash.set(obj, obj);
   }
 
-  let cloneObj: any = Array.isArray(obj) ? [] : {};
+  const cloneObj: any = Array.isArray(obj) ? [] : {};
 
-  for (let key in obj) {
+  for (const key in obj) {
     if (obj.hasOwnProperty(key)) {
       if (typeof obj[key] === "object") {
         cloneObj[key] = deepClone(obj[key]);
