@@ -40,17 +40,39 @@ src/
 ├── app/
 │   ├── layout.tsx            根布局
 │   ├── page.tsx              首页
+│   ├── parse/                简历解析页（可上传 PDF 或粘贴文本）
 │   ├── session/[id]/         做题页（骨架）
 │   ├── report/[id]/          复盘报告页（骨架）
 │   └── api/
-│       └── parse/route.ts    简历解析接口（占位，返回 501）
+│       └── parse/route.ts    简历解析接口
 ├── components/
 │   ├── NavBar.tsx
-│   └── Toast.tsx
+│   ├── Toast.tsx
+│   └── parse/ParsePanel.tsx  解析交互面板
+├── lib/
+│   ├── env.ts                环境变量读取
+│   ├── llm.ts                DeepSeek 客户端（JSON 模式 + 重试）
+│   ├── pdf.ts                浏览器端 PDF 文本抽取
+│   ├── prompts.ts            提示词
+│   ├── schemas.ts            zod 契约与类型
+│   └── constants.ts          前后端共享常量
 ├── store/
 │   └── toastStore.ts
 └── utils/                    手写练习：bind / call / apply / 深拷贝 / 环形缓存
+
+scripts/
+├── copy-pdfjs-assets.mjs     把 pdfjs 的 worker / cmaps / 字体复制到 public/pdfjs
+└── check-secrets.mjs         提交前扫描明文密钥
 ```
+
+### PDF 解析说明
+
+PDF 全程在**浏览器内**解析，不上传到服务器：
+
+- 使用 `pdfjs-dist`，通过动态 `import()` 按需加载，不影响首屏体积
+- worker、`cmaps`、`standard_fonts` 由 `predev` / `prebuild` 自动复制到 `public/pdfjs/`
+- `cmaps` 是必需的：中文 PDF 大量使用 CID 字体，缺了会导致乱码或抽取失败
+- 扫描件（图片型 PDF）没有文字层，会提示先用 OCR 转文本
 
 ## 本地运行
 

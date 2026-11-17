@@ -1,15 +1,22 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import type { ApiErrorBody } from "@/lib/schemas";
-import type { ResumePoint } from "@/lib/schemas";
+import { useMemo, useRef, useState } from "react";
+import type { ApiErrorBody, ResumePoint } from "@/lib/schemas";
 import { MIN_RESUME_CHARS } from "@/lib/constants";
+import { extractPdfText, PdfError, MAX_PDF_BYTES } from "@/lib/pdf";
 
 type Phase = "idle" | "submitting" | "success" | "error";
 
 interface ParseResponse {
   points: ResumePoint[];
   truncated: boolean;
+}
+
+interface FileMeta {
+  name: string;
+  pageCount: number;
+  emptyPageCount: number;
+  chars: number;
 }
 
 const SAMPLE_RESUME = `李劭然，前端开发工程师，八年经验。
@@ -57,9 +64,18 @@ export default function ParsePanel() {
   const [elapsedMs, setElapsedMs] = useState<number | null>(null);
   const [copied, setCopied] = useState(false);
 
+  // —— PDF 上传相关状态 ——
+  const [extracting, setExtracting] = useState(false);
+  const [dragActive, setDragActive] = useState(false);
+  const [fileMeta, setFileMeta] = useState<FileMeta | null>(null);
+  const [pdfError, setPdfError] = useState<{ code: string; message: string } | null>(
+    null,
+  );
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   const charCount = text.trim().length;
   const tooShort = charCount < MIN_RESUME_CHARS;
-  const canSubmit = !tooShort && phase !== "submitting";
+  const canSubmit = !tooShort && !extracting && phase !== "submitting";
 
   const lengthHint = useMemo(() => {
     if (charCount === 0) return `至少需要 ${MIN_RESUME_CHARS} 个字符`;
@@ -67,6 +83,55 @@ export default function ParsePanel() {
     return `${charCount} 个字符`;
   }, [charCount, tooShort]);
 
+  // ---------- PDF 抽取 ----------
+  async function handleFile(file: File) {
+    setPdfError(null);
+    setExtracting(true);
+    // 上传新文件时清掉上一轮结果，避免新旧混淆
+    setResult(null);
+    setError(null);
+    setPhase("idle");
+    setElapsedMs(null);
+
+    try {
+      const parsed = await extractPdfText(file);
+      setText(parsed.text);
+      setFileMeta({
+        name: file.name,
+        pageCount: parsed.pageCount,
+        emptyPageCount: parsed.emptyPageCount,
+        chars: parsed.text.length,
+      });
+    } catch (err) {
+      setFileMeta(null);
+      if (err instanceof PdfError) {
+        setPdfError({ code: err.code, message: err.message });
+      } else {
+        setPdfError({
+          code: "PARSE_FAILED",
+          message: err instanceof Error ? err.message : "PDF 解析失败",
+        });
+      }
+    } finally {
+      setExtracting(false);
+    }
+  }
+
+  function onPickFile(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    // 允许重复选择同一个文件
+    event.target.value = "";
+    if (file) void handleFile(file);
+  }
+
+  function onDrop(event: React.DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    setDragActive(false);
+    const file = event.dataTransfer.files?.[0];
+    if (file) void handleFile(file);
+  }
+
+  // ---------- 提交解析 ----------
   async function handleSubmit() {
     if (!canSubmit) return;
 
@@ -85,9 +150,7 @@ export default function ParsePanel() {
         body: JSON.stringify({ text }),
       });
 
-      const elapsed = Math.round(performance.now() - startedAt);
-      setElapsedMs(elapsed);
-
+      setElapsedMs(Math.round(performance.now() - startedAt));
       const payload: unknown = await response.json();
 
       if (!response.ok) {
@@ -125,28 +188,113 @@ export default function ParsePanel() {
     }
   }
 
+  function resetAll() {
+    setText("");
+    setFileMeta(null);
+    setPdfError(null);
+    setResult(null);
+    setError(null);
+    setPhase("idle");
+    setElapsedMs(null);
+  }
+
+  const maxMb = Math.round(MAX_PDF_BYTES / 1024 / 1024);
+
   return (
     <div className="space-y-6">
-      {/* 输入区 */}
+      {/* PDF 上传 */}
+      <section
+        onDragOver={(e) => {
+          e.preventDefault();
+          setDragActive(true);
+        }}
+        onDragLeave={() => setDragActive(false)}
+        onDrop={onDrop}
+        className={`rounded-xl border-2 border-dashed p-5 text-center transition ${
+          dragActive
+            ? "border-blue-500 bg-blue-50 dark:bg-blue-950/30"
+            : "border-slate-300 dark:border-slate-600"
+        }`}
+      >
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="application/pdf,.pdf"
+          onChange={onPickFile}
+          className="hidden"
+        />
+
+        {extracting ? (
+          <p className="text-sm text-slate-500 dark:text-slate-400">
+            正在提取 PDF 文字…
+          </p>
+        ) : (
+          <>
+            <p className="text-sm text-slate-600 dark:text-slate-300">
+              把 PDF 拖到这里，或
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="mx-1 text-blue-600 hover:underline dark:text-blue-400"
+              >
+                选择文件
+              </button>
+            </p>
+            <p className="mt-1 text-xs text-slate-400">
+              仅 PDF，≤ {maxMb}MB · 全程在浏览器解析，文件不会上传
+            </p>
+          </>
+        )}
+
+        {fileMeta && (
+          <p className="mt-3 text-xs text-emerald-600 dark:text-emerald-400">
+            已载入 {fileMeta.name} · {fileMeta.pageCount} 页 · 提取{" "}
+            {fileMeta.chars} 字
+            {fileMeta.emptyPageCount > 0 &&
+              `（其中 ${fileMeta.emptyPageCount} 页无文字）`}
+          </p>
+        )}
+
+        {pdfError && (
+          <div className="mt-3 rounded-lg bg-rose-50 p-3 text-left dark:bg-rose-950/40">
+            <p className="text-xs font-medium text-rose-700 dark:text-rose-300">
+              PDF 解析失败
+              <code className="ml-2 rounded bg-rose-100 px-1 py-0.5 dark:bg-rose-900/60">
+                {pdfError.code}
+              </code>
+            </p>
+            <p className="mt-1 text-xs text-rose-700/90 dark:text-rose-200/90">
+              {pdfError.message}
+            </p>
+          </div>
+        )}
+      </section>
+
+      {/* 文本输入 */}
       <section className="rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-800">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <label htmlFor="resume" className="text-sm font-medium">
             简历正文
+            <span className="ml-2 text-xs font-normal text-slate-400">
+              可从 PDF 提取，也可以直接粘贴
+            </span>
           </label>
           <div className="flex items-center gap-3">
             <span
               className={`text-xs ${
-                tooShort
-                  ? "text-amber-600 dark:text-amber-400"
-                  : "text-slate-400"
+                tooShort ? "text-amber-600 dark:text-amber-400" : "text-slate-400"
               }`}
             >
               {lengthHint}
             </span>
             <button
               type="button"
-              onClick={() => setText(SAMPLE_RESUME)}
-              className="text-xs px-2 py-1 rounded border border-slate-300 hover:bg-slate-50 dark:border-slate-600 dark:hover:bg-slate-700"
+              onClick={() => {
+                setText(SAMPLE_RESUME);
+                setFileMeta(null);
+                setPdfError(null);
+              }}
+              className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-50 dark:border-slate-600 dark:hover:bg-slate-700"
             >
               填入示例
             </button>
@@ -159,7 +307,7 @@ export default function ParsePanel() {
           onChange={(e) => setText(e.target.value)}
           rows={12}
           spellCheck={false}
-          placeholder="把简历正文粘贴到这里（纯文本即可，至少 80 个字符）"
+          placeholder="上传 PDF 后会自动填到这里；也可以直接粘贴简历正文（至少 80 个字符）"
           className="w-full resize-y rounded-lg border border-slate-300 bg-white p-3 text-sm leading-relaxed outline-none focus:border-blue-500 dark:border-slate-600 dark:bg-slate-900"
         />
 
@@ -168,26 +316,21 @@ export default function ParsePanel() {
             type="button"
             onClick={handleSubmit}
             disabled={!canSubmit}
-            className="px-5 py-2.5 rounded-lg bg-blue-600 text-white text-sm font-medium transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
+            className="rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
           >
             {phase === "submitting" ? "解析中…" : "开始解析"}
           </button>
 
-          {text.length > 0 && phase !== "submitting" && (
-            <button
-              type="button"
-              onClick={() => {
-                setText("");
-                setResult(null);
-                setError(null);
-                setPhase("idle");
-                setElapsedMs(null);
-              }}
-              className="text-sm text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
-            >
-              清空
-            </button>
-          )}
+          {(text.length > 0 || fileMeta || pdfError) &&
+            phase !== "submitting" && (
+              <button
+                type="button"
+                onClick={resetAll}
+                className="text-sm text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+              >
+                清空
+              </button>
+            )}
 
           {elapsedMs !== null && (
             <span className="text-xs text-slate-400">耗时 {elapsedMs} ms</span>
@@ -195,7 +338,7 @@ export default function ParsePanel() {
         </div>
       </section>
 
-      {/* 错误 */}
+      {/* 接口错误 */}
       {phase === "error" && error && (
         <section
           role="alert"
@@ -210,9 +353,7 @@ export default function ParsePanel() {
               {error.code}
             </code>
           </div>
-          <p className="text-sm text-rose-800 dark:text-rose-200">
-            {error.message}
-          </p>
+          <p className="text-sm text-rose-800 dark:text-rose-200">{error.message}</p>
           {ERROR_HINT[error.code] && (
             <p className="mt-2 text-sm text-rose-700/80 dark:text-rose-300/80">
               {ERROR_HINT[error.code]}
@@ -236,7 +377,7 @@ export default function ParsePanel() {
             <button
               type="button"
               onClick={handleCopy}
-              className="text-xs px-2 py-1 rounded border border-slate-300 hover:bg-slate-50 dark:border-slate-600 dark:hover:bg-slate-700"
+              className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-50 dark:border-slate-600 dark:hover:bg-slate-700"
             >
               {copied ? "已复制" : "复制 JSON"}
             </button>
@@ -274,9 +415,9 @@ export default function ParsePanel() {
       )}
 
       {/* 空态 */}
-      {phase === "idle" && (
+      {phase === "idle" && !extracting && (
         <p className="text-sm text-slate-400">
-          解析结果会显示在这里。点击「填入示例」可以先用一份示例简历试试。
+          解析结果会显示在这里。可以上传 PDF，或点「填入示例」先用示例简历试试。
         </p>
       )}
     </div>

@@ -40,3 +40,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# pdfjs 运行时资源（由 scripts/copy-pdfjs-assets.mjs 从 node_modules 生成）
+/public/pdfjs/

@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // public 下是第三方静态资源（含由 node_modules 复制来的 pdfjs worker），不参与 lint
+    "public/**",
   ]),
   {
     // src/utils 是手写练习代码，刻意模仿原生实现（bind / call / apply / 深拷贝），
