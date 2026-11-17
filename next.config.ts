@@ -7,7 +7,11 @@ import type { NextConfig } from "next";
  */
 const standalone = process.env.BUILD_STANDALONE === "1";
 
+// 允许用环境变量指定构建输出目录，用于在不干扰 dev server 的情况下做生产验证
+const distDir = process.env.NEXT_DIST_DIR;
+
 const nextConfig: NextConfig = {
+  ...(distDir ? { distDir } : {}),
   ...(standalone ? { output: "standalone" as const } : {}),
   experimental: {
     agentFeedback: true,

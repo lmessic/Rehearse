@@ -5,3 +5,149 @@
     @apply bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-100;
   }
 }
+
+/*
+ * 流式 Markdown 的最小排版。
+ * 不引 @tailwindcss/typography：这里只需要几种元素，
+ * 自己写十几行比多一个依赖更划算。
+ */
+.md-body {
+  font-size: 0.875rem;
+  line-height: 1.7;
+  word-break: break-word;
+}
+
+.md-body > *:first-child {
+  margin-top: 0;
+}
+.md-body > *:last-child {
+  margin-bottom: 0;
+}
+
+.md-body p {
+  margin: 0 0 0.75em;
+}
+
+.md-body h1,
+.md-body h2,
+.md-body h3,
+.md-body h4 {
+  font-weight: 600;
+  margin: 1em 0 0.5em;
+  line-height: 1.4;
+}
+.md-body h1 { font-size: 1.25em; }
+.md-body h2 { font-size: 1.15em; }
+.md-body h3 { font-size: 1.05em; }
+
+.md-body ul,
+.md-body ol {
+  margin: 0 0 0.75em;
+  padding-left: 1.4em;
+}
+.md-body ul { list-style: disc; }
+.md-body ol { list-style: decimal; }
+.md-body li { margin: 0.2em 0; }
+
+.md-body code {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 0.9em;
+  padding: 0.1em 0.35em;
+  border-radius: 0.25rem;
+  background: rgb(241 245 249);
+  color: rgb(190 24 93);
+}
+
+.md-body pre {
+  margin: 0 0 0.75em;
+  padding: 0.75em 0.9em;
+  overflow-x: auto;
+  border-radius: 0.5rem;
+  background: rgb(241 245 249);
+  font-size: 0.82em;
+  line-height: 1.55;
+}
+
+.md-body pre code {
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 1em;
+}
+
+.md-body blockquote {
+  margin: 0 0 0.75em;
+  padding-left: 0.8em;
+  border-left: 2px solid rgb(203 213 225);
+  color: rgb(100 116 139);
+}
+
+.md-body strong {
+  font-weight: 600;
+}
+
+.md-body hr {
+  border: 0;
+  border-top: 1px solid rgb(226 232 240);
+  margin: 1em 0;
+}
+
+.md-body a {
+  color: rgb(37 99 235);
+  text-decoration: underline;
+}
+
+/* 深色模式 */
+@media (prefers-color-scheme: dark) {
+  .md-body code {
+    background: rgb(30 41 59);
+    color: rgb(244 114 182);
+  }
+  .md-body pre {
+    background: rgb(15 23 42);
+  }
+  .md-body blockquote {
+    border-color: rgb(71 85 105);
+    color: rgb(148 163 184);
+  }
+  .md-body hr {
+    border-color: rgb(51 65 85);
+  }
+  .md-body a {
+    color: rgb(96 165 250);
+  }
+}
+
+/* 未闭合代码块的降级显示：故意不做语法高亮 */
+.md-pending {
+  margin: 0 0 0.75em;
+  padding: 0.75em 0.9em;
+  overflow-x: auto;
+  border-radius: 0.5rem;
+  background: rgb(248 250 252);
+  border: 1px dashed rgb(203 213 225);
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 0.82em;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  color: rgb(71 85 105);
+}
+
+@media (prefers-color-scheme: dark) {
+  .md-pending {
+    background: rgb(15 23 42);
+    border-color: rgb(71 85 105);
+    color: rgb(148 163 184);
+  }
+}
+
+/* 流式光标 */
+.stream-cursor::after {
+  content: "▌";
+  margin-left: 1px;
+  animation: stream-blink 1s step-end infinite;
+}
+
+@keyframes stream-blink {
+  50% { opacity: 0; }
+}

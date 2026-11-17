@@ -198,3 +198,137 @@ export async function chatJson<T>(
 
   throw lastError ?? new LlmError("UPSTREAM_ERROR", "未知错误");
 }
+
+// ---------------------------------------------------------------------------
+// 流式
+// ---------------------------------------------------------------------------
+
+export type ChatRole = "system" | "user" | "assistant";
+
+export interface ChatMessage {
+  role: ChatRole;
+  content: string;
+}
+
+interface ChatStreamOptions {
+  messages: ChatMessage[];
+  maxTokens?: number;
+  /** 整体超时；为 0 表示不设上限（由调用方通过 signal 控制） */
+  timeoutMs?: number;
+  /** 外部取消信号，通常是 request.signal */
+  signal?: AbortSignal;
+}
+
+/**
+ * 把上游的流式响应转成「文本增量」异步生成器。
+ *
+ * 只负责最底层的搬运：
+ *   - 处理 DeepSeek 的 `data: {...}` / `data: [DONE]` 帧；
+ *   - 只取 choices[0].delta.content，其余（role 帧、usage 帧）忽略；
+ *   - 消费方 break 或抛错时，取消底层 reader，避免连接悬挂。
+ */
+export async function* chatStream(
+  opts: ChatStreamOptions,
+): AsyncGenerator<string, void, unknown> {
+  const apiKey = env.deepseekApiKey; // 缺失时抛 MissingEnvError，由调用方转换
+  const url = `${env.deepseekBaseUrl.replace(/\/+$/, "")}/chat/completions`;
+
+  // 手动合并「外部取消」与「整体超时」两种中止来源
+  const controller = new AbortController();
+  const onExternalAbort = () => controller.abort();
+  opts.signal?.addEventListener("abort", onExternalAbort, { once: true });
+  const timer =
+    opts.timeoutMs && opts.timeoutMs > 0
+      ? setTimeout(() => controller.abort(), opts.timeoutMs)
+      : null;
+
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: env.deepseekModel,
+        messages: opts.messages,
+        stream: true,
+        temperature: 0.7,
+        max_tokens: opts.maxTokens ?? 800,
+      }),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      const detail = await response.text().catch(() => "");
+      if (response.status === 401 || response.status === 403) {
+        throw new LlmError(
+          "CONFIG_INVALID",
+          `模型鉴权失败（${response.status}）：${detail.slice(0, 200)}`,
+        );
+      }
+      throw new LlmError(
+        "UPSTREAM_ERROR",
+        `模型返回 ${response.status}：${detail.slice(0, 200)}`,
+      );
+    }
+
+    if (!response.body) {
+      throw new LlmError("UPSTREAM_ERROR", "模型没有返回流");
+    }
+
+    reader = response.body.getReader();
+    const decoder = new TextDecoder("utf-8");
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+
+      let boundary: number;
+      while ((boundary = buffer.indexOf("\n")) !== -1) {
+        const line = buffer.slice(0, boundary).trim();
+        buffer = buffer.slice(boundary + 1);
+
+        if (!line.startsWith("data:")) continue; // 空行、注释、event: 等
+        const payload = line.slice(5).trim();
+        if (payload === "" || payload === "[DONE]") continue;
+
+        let frame: {
+          choices?: Array<{ delta?: { content?: string | null } }>;
+        };
+        try {
+          frame = JSON.parse(payload);
+        } catch {
+          continue; // 半截帧，跳过
+        }
+
+        const delta = frame.choices?.[0]?.delta?.content;
+        if (typeof delta === "string" && delta.length > 0) {
+          yield delta;
+        }
+      }
+    }
+  } catch (error) {
+    // 被取消：交给调用方判断，不当作错误
+    if (controller.signal.aborted) {
+      const isExternal = opts.signal?.aborted === true;
+      if (isExternal) return; // 客户端主动断开，安静结束
+      throw new LlmError("UPSTREAM_TIMEOUT", "模型响应超时");
+    }
+    if (error instanceof LlmError) throw error;
+    throw new LlmError(
+      "UPSTREAM_ERROR",
+      `流式读取失败：${(error as Error)?.message ?? "未知错误"}`,
+    );
+  } finally {
+    if (timer) clearTimeout(timer);
+    opts.signal?.removeEventListener("abort", onExternalAbort);
+    // 消费方提前 break 时也要释放连接
+    await reader?.cancel().catch(() => {});
+  }
+}
