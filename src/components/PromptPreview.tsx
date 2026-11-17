@@ -32,12 +32,12 @@ export default function PromptPreview() {
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 mt-4">
       <button
         onClick={handleGenerate}
         className="w-full py-3 rounded-lg bg-blue-600 text-white hover:bg-blue-700 font-medium"
       >
-        ✨ 生成 Prompt
+        ✨ 生成 Prompt 并保存历史
       </button>
 
       <div>
@@ -54,8 +54,8 @@ export default function PromptPreview() {
           readOnly
           value={result.positive}
           placeholder="点击上方生成按钮"
-          rows={6}
-          className="mt-1 w-full rounded-lg border p-2 dark:bg-slate-700 dark:border-slate-600"
+          rows={5}
+          className="mt-1 w-full border rounded p-2 dark:bg-slate-700 dark:border-slate-600"
         />
       </div>
 
@@ -72,9 +72,9 @@ export default function PromptPreview() {
         <textarea
           readOnly
           value={result.negative}
-          placeholder="启用负面词才会生成"
-          rows={4}
-          className="mt-1 w-full rounded-lg border p-2 dark:bg-slate-700 dark:border-slate-600"
+          placeholder="点击上方生成按钮"
+          rows={5}
+          className="mt-1 w-full border rounded p-2 dark:bg-slate-700 dark:border-slate-600"
         />
       </div>
 
@@ -93,18 +93,18 @@ export default function PromptPreview() {
               value={templateName}
               onChange={(e) => setTemplateName(e.target.value)}
               placeholder="输入模板名称"
-              className="w-full rounded-lg border p-2 dark:bg-slate-700 dark:border-slate-600"
+              className="w-full border rounded p-2 dark:bg-slate-700 dark:border-slate-600"
             />
             <div className="flex gap-2">
               <button
                 onClick={handleSaveTemplate}
-                className="flex-1 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
+                className="flex-1 py-2 bg-green-600 text-white rounded hover:bg-green-700"
               >
                 确认保存
               </button>
               <button
                 onClick={() => setShowTemplateInput(false)}
-                className="flex-1 py-2 bg-gray-300 rounded-lg hover:bg-gray-400 dark:bg-slate-600 dark:hover:bg-slate-500"
+                className="flex-1 py-2 bg-gray-500 text-white rounded hover:bg-gray-600"
               >
                 取消
               </button>
