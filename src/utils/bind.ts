@@ -76,3 +76,43 @@ export function deepClone(obj: any, hash = new WeakMap()): any {
 
   return cloneObj;
 }
+
+// 手写new原理
+function MyNew(constructor: any, ...args: any) {
+  const obj = {};
+
+  obj.__proto__ = constructor.prototype;
+
+  const res = constructor.call(obj, ...args);
+
+  return res instanceof Object ? res : obj;
+}
+
+function debounce(fn: () => void, wait: number) {
+  let timer: any = null;
+
+  return function () {
+    if (timer) {
+      clearTimeout(timer);
+    }
+    timer = setTimeout(() => {
+      fn.call(this, ...arguments);
+      clearTimeout(timer);
+      timer = null;
+    }, wait);
+  };
+}
+
+function throttle(fn: () => void, delay: number) {
+  let timer: any = null;
+
+  return function () {
+    if (!timer) {
+      timer = setTimeout(() => {
+        fn.call(this, ...arguments);
+        clearTimeout(timer);
+        timer = null;
+      }, delay);
+    }
+  };
+}

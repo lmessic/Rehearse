@@ -18,6 +18,9 @@ export default function NavBar() {
           <Link href="/parse" className="hover:text-blue-600">
             简历解析
           </Link>
+          <Link href="/chat" className="hover:text-blue-600">
+            自由对话
+          </Link>
           <Link href="/session/demo" className="hover:text-blue-600">
             开始练习
           </Link>

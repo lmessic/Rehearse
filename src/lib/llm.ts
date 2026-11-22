@@ -174,9 +174,7 @@ async function callOnce<T>(
  * 请求模型并返回通过 schema 校验的结构化数据。
  * 可重试的错误会退避重试一次；不可重试的直接抛。
  */
-export async function chatJson<T>(
-  opts: ChatJsonOptions<T>,
-): Promise<T> {
+export async function chatJson<T>(opts: ChatJsonOptions<T>): Promise<T> {
   let lastError: LlmError | undefined;
 
   for (let attempt = 0; attempt < 2; attempt++) {
