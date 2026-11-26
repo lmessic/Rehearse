@@ -1,7 +1,10 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
-import { consumeChatStream, createChatRequest } from "@/lib/chat-client";
+import {
+  createChatClient,
+  type ChatRequestMessage,
+} from "@/lib/chat-client";
 
 export type ChatRole = "user" | "assistant";
 
@@ -30,8 +33,9 @@ export function useChatPanel() {
   const [input, setInput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
 
-  // AbortController 用于主动取消 fetch，组件卸载时也会调用。
-  const abortRef = useRef<AbortController | null>(null);
+  // 保存当前客户端，以便用户停止或组件卸载时取消连接和重试等待。
+  const clientRef = useRef<ReturnType<typeof createChatClient> | null>(null);
+  const mountedRef = useRef(true);
 
   // 网络 chunk 到达频率远高于浏览器渲染帧率；
   // 先存到 pendingRef，每个 rAF 周期合并后再提交一次 setMessages。
@@ -62,8 +66,10 @@ export function useChatPanel() {
    * 防止卸载后继续 setState 或继续读取网络流。
    */
   useEffect(() => {
+    mountedRef.current = true;
     return () => {
-      abortRef.current?.abort();
+      mountedRef.current = false;
+      clientRef.current?.close();
       if (rafRef.current !== null) {
         cancelAnimationFrame(rafRef.current);
       }
@@ -81,16 +87,23 @@ export function useChatPanel() {
    * 提交表单后的完整请求生命周期：
    * 1. 校验输入并阻止重复发送；
    * 2. 在本地列表中追加用户消息和空的助理占位消息；
-   * 3. 创建 AbortController；
-   * 4. 等待 Express 响应流；
+   * 3. 创建 SSEClient 并连接 Express 聊天接口；
+   * 4. 由客户端负责解析流、取消请求和有限重试；
    * 5. 收到 delta 时合批追加，收到 error 时展示错误；
-   * 6. finally 重置流式状态并清理 controller 引用。
+   * 6. finally 重置流式状态并清理客户端引用。
    */
   async function sendMessage(event: FormEvent) {
     event.preventDefault();
 
     const text = input.trim();
     if (!text || isStreaming) return;
+
+    // 上下文：最近二十条有效对话
+    const context: ChatRequestMessage[] = messages
+      .slice(1)
+      .filter((message) => message.content.trim())
+      .slice(-19);
+    context.push({ role: "user", content: text });
 
     setMessages((current) => [
       ...current,
@@ -101,13 +114,8 @@ export function useChatPanel() {
     setIsStreaming(true);
     pendingRef.current = "";
 
-    const controller = new AbortController();
-    abortRef.current = controller;
-
-    try {
-      const body = await createChatRequest(text, controller.signal);
-
-      await consumeChatStream(body, (frame) => {
+    const client = createChatClient(context, {
+      onFrame(frame) {
         if (frame.t === "delta") {
           pendingRef.current += frame.v;
           if (rafRef.current === null) {
@@ -116,18 +124,26 @@ export function useChatPanel() {
         } else if (frame.t === "error") {
           appendAssistantError(frame.message ?? frame.code);
         }
-      });
+      },
+    });
+    clientRef.current = client;
+
+    try {
+      await client.connect();
 
       // 流正常结束前，立即刷新缓存中剩余的最后几个 delta，
       // 避免最后一个 rAF 尚未执行就丢掉尾部文字。
-      if (rafRef.current !== null) {
-        cancelAnimationFrame(rafRef.current);
-        rafRef.current = null;
+      if (mountedRef.current) {
+        if (rafRef.current !== null) {
+          cancelAnimationFrame(rafRef.current);
+          rafRef.current = null;
+        }
+        flushPending();
       }
-      flushPending();
     } catch (error) {
-      if ((error as Error).name !== "AbortError") {
-        const message = (error as Error).message || "网络请求失败，请稍后重试";
+      if (mountedRef.current) {
+        const message =
+          error instanceof Error ? error.message : "网络请求失败，请稍后重试";
 
         setMessages((current) => [
           ...current.slice(0, -1),
@@ -135,16 +151,17 @@ export function useChatPanel() {
         ]);
       }
     } finally {
-      setIsStreaming(false);
-      if (abortRef.current === controller) {
-        abortRef.current = null;
+      if (mountedRef.current) {
+        setIsStreaming(false);
+      }
+      if (clientRef.current === client) {
+        clientRef.current = null;
       }
     }
   }
 
   function stopMessage() {
-    // abort() 会触发 fetch 的 AbortError；finally 会负责恢复发送状态。
-    abortRef.current?.abort();
+    clientRef.current?.close();
   }
 
   return {

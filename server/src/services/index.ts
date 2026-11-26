@@ -23,16 +23,45 @@ app.use((req, res, next) => {
 });
 
 /**
+ * 往 SSE 连接里写一帧。
+ *
+ * 连接可能在写之前就断了（用户关页面、切网络），此时 write 会返回 false
+ * 甚至抛错。统一走这里，避免在已关闭的响应上继续写。
+ */
+const writeFrame = (res: Response, payload: unknown) => {
+  if (res.writableEnded || res.destroyed) return;
+  res.write(`data: ${JSON.stringify(payload)}\n\n`);
+};
+
+/**
  * 聊天接口的完整处理流程：
- * 1. 接收前端的 { query } 请求体；
+ * 1. 接收前端最近的对话消息；
  * 2. 设置 SSE 响应头并立即发出首帧；
  * 3. 使用服务端密钥调用 OpenAI/DeepSeek兼容接口；
  * 4. 将上游流逐段解析并转成前端统一的数据帧；
- * 5. 遇到错误时通过 SSE 返回 error 帧。
+ * 5. 遇到错误时通过 SSE 返回 error 帧；
+ * 6. 客户端断开时中止上游请求，避免继续消耗 token。
  */
 app.post("/api/chat", validateChatRequest, async (req, res) => {
+  // 每个请求一个 AbortController，用来把「客户端断开」传导到上游 fetch。
+  const controller = new AbortController();
+
+  /**
+   * 客户端断开检测。
+   *
+   * res 的 "close" 在连接结束时一定会触发——包括正常结束。
+   * 所以要看 writableEnded：它为 false 说明我们还没调用 res.end()，
+   * 那就是客户端提前走了（关页面、点停止、断网）。
+   */
+  res.on("close", () => {
+    if (!res.writableEnded) {
+      console.info("[chat] 客户端断开，中止上游请求");
+      controller.abort();
+    }
+  });
+
   try {
-    const { query } = req.body;
+    const { messages } = req.body;
 
     // 设置 SSE 必需响应头。
     // text/event-stream 表明浏览器应持续读取响应；no-cache 和 keep-alive
@@ -44,12 +73,10 @@ app.post("/api/chat", validateChatRequest, async (req, res) => {
 
     // meta 帧先通知前端本次请求已经建立。
     // 每条请求都有独立 ID，便于后续日志和排查问题。
-    res.write(
-      `data: ${JSON.stringify({
-        t: "meta",
-        id: `chat_${Date.now().toString(36)}`,
-      })}\n\n`,
-    );
+    writeFrame(res, {
+      t: "meta",
+      id: `chat_${Date.now().toString(36)}`,
+    });
 
     // 由后端持有密钥并调用模型厂商，浏览器不会看到 API 密钥。
     // /chat/completions 是 DeepSeek 等兼容服务的 OpenAI 风格接口。
@@ -61,9 +88,11 @@ app.post("/api/chat", validateChatRequest, async (req, res) => {
       },
       body: JSON.stringify({
         model: MODEL_NAME,
-        messages: [{ role: "user", content: query }],
+        messages,
         stream: true,
       }),
+      // 关键：把客户端断开传导给上游，断开后模型侧也停止生成
+      signal: controller.signal,
     });
 
     // 非 2xx 响应通常表示地址、密钥、模型或额度参数存在问题，
@@ -75,18 +104,18 @@ app.post("/api/chat", validateChatRequest, async (req, res) => {
     // response.body 是模型返回的 ReadableStream。
     // 逐 chunk 读取并持续写入浏览器，不等待模型完整生成后再一次性返回。
     await handlesseResponse(res, response.body);
-    res.end();
+    if (!res.writableEnded) res.end();
   } catch (error: unknown) {
+    // 被 abort 掉不算错误：客户端已经走了，没有对象可以报错
+    if (controller.signal.aborted) {
+      console.info("[chat] 已中止，停止写入");
+      return;
+    }
+
     console.error("调用API时出错", error);
     const message = error instanceof Error ? error.message : "抱歉发生了错误";
-    res.write(
-      `data: ${JSON.stringify({
-        t: "error",
-        code: "UPSTREAM_ERROR",
-        message,
-      })}\n\n`,
-    );
-    res.end();
+    writeFrame(res, { t: "error", code: "UPSTREAM_ERROR", message });
+    if (!res.writableEnded) res.end();
   }
 });
 
@@ -118,10 +147,14 @@ const handlesseResponse = async (
   // TextDecoder({ stream: true }) 会保留跨 chunk 的不完整 UTF-8 字节。
   const reader = stream.getReader();
   const decoder = new TextDecoder();
+  // 缓存
   let buffer = "";
 
   try {
     while (true) {
+      // 连接已经断了就不必再拉上游数据（abort 会同时中止 fetch）
+      if (res.destroyed) break;
+
       // 每次读到的 value 可能只包含半行或半个中文字符。
       const { done, value } = await reader.read();
       if (done) break;
@@ -143,7 +176,7 @@ const handlesseResponse = async (
 
         // OpenAI兼容上游使用 [DONE] 表示流式输出结束。
         if (data === "[DONE]") {
-          res.write(`data: ${JSON.stringify({ t: "done" })}\n\n`);
+          writeFrame(res, { t: "done" });
           continue;
         }
 
@@ -154,9 +187,7 @@ const handlesseResponse = async (
           const content = parsed.choices[0]?.delta?.content;
 
           if (typeof content === "string") {
-            res.write(
-              `data: ${JSON.stringify({ t: "delta", v: content })}\n\n`,
-            );
+            writeFrame(res, { t: "delta", v: content });
           }
         } catch (e) {
           // 坏帧只记录日志，不中断整个模型流。
@@ -168,8 +199,13 @@ const handlesseResponse = async (
     const message = error instanceof Error ? error.message : "未知流处理错误";
     throw new Error(`流处理错误: ${message}`);
   } finally {
-    // 不论正常结束还是发生异常，都释放流读取锁。
-    reader.releaseLock();
+    // 不论正常结束还是发生异常，都释放流读取锁；
+    // 流被中止时 releaseLock 可能抛错，所以包一层。
+    try {
+      reader.releaseLock();
+    } catch {
+      // 已释放或流已关闭，忽略
+    }
   }
 };
 

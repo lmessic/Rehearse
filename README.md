@@ -86,11 +86,11 @@ npm install
 #    Windows PowerShell: Copy-Item .env.example .env.local
 cp .env.example .env.local
 
-# 3. 启动开发服务器
-npm run dev
+# 3. 同时启动 Next.js 和 Express
+npm run dev:all
 ```
 
-打开 http://localhost:3000
+打开 http://localhost:3000。停止时按 Ctrl+C；如只需启动 Next.js，可继续使用 `npm run dev`。
 
 ### 环境变量
 
@@ -110,13 +110,13 @@ npm run dev
 
 **生产环境**：用服务器上的环境变量，不要把 `.env.production` 打进镜像。
 
-| 方式 | 说明 | 推荐度 |
-| --- | --- | --- |
-| 平台 Secrets / KMS | 云厂商凭据管理、部署平台的环境变量面板 | ⭐⭐⭐ |
-| `docker compose` 的 `env_file` | 文件在服务器上、`chmod 600`、不进 git 不进镜像 | ⭐⭐ |
-| 宿主机环境变量注入 | `environment: DEEPSEEK_API_KEY=${...}` | ⭐⭐ |
-| 写进 `Dockerfile` 的 `ENV` | 会固化在镜像层，`docker history` 可见 | ❌ |
-| 提交到 git | 删掉也在历史里 | ❌ |
+| 方式                           | 说明                                           | 推荐度 |
+| ------------------------------ | ---------------------------------------------- | ------ |
+| 平台 Secrets / KMS             | 云厂商凭据管理、部署平台的环境变量面板         | ⭐⭐⭐ |
+| `docker compose` 的 `env_file` | 文件在服务器上、`chmod 600`、不进 git 不进镜像 | ⭐⭐   |
+| 宿主机环境变量注入             | `environment: DEEPSEEK_API_KEY=${...}`         | ⭐⭐   |
+| 写进 `Dockerfile` 的 `ENV`     | 会固化在镜像层，`docker history` 可见          | ❌     |
+| 提交到 git                     | 删掉也在历史里                                 | ❌     |
 
 **提交前自检**：
 
@@ -154,12 +154,12 @@ npm run lint
 
 ## 开发进度
 
-| 阶段 | 内容                                 | 状态   |
-| ---- | ------------------------------------ | ------ |
+| 阶段 | 内容                                 | 状态    |
+| ---- | ------------------------------------ | ------- |
 | W1   | 骨架上线 + 简历解析（含 PDF 上传）   | ✅ 完成 |
 | W2   | 流式作答（手写 SSE 解析 + rAF 合批） | ✅ 完成 |
-| W3   | 状态机 + 中断 + 降级                 | 待开始 |
-| W4   | 复盘报告 + 示例体验 + 演示录屏       | 待开始 |
+| W3   | 状态机 + 中断 + 降级                 | 待开始  |
+| W4   | 复盘报告 + 示例体验 + 演示录屏       | 待开始  |
 
 ## 本地验证流式（不消耗模型额度）
 
@@ -175,6 +175,7 @@ DEEPSEEK_BASE_URL=http://127.0.0.1:8899 DEEPSEEK_API_KEY=sk-mock npm run dev
 ```
 
 打开 `/session/demo` 作答，就能看到流式输出。这个 mock 会：
+
 - 先发一个只有 `role` 的空帧（真实上游就是这样）
 - **把一个汉字从字节中间切开分两次发送**——验证 `TextDecoder` 的流式解码
 - 每帧间隔 70ms，便于观察增量渲染
@@ -200,6 +201,10 @@ NEXT_DIST_DIR=.nextverify npx next start -p 3417
 
 SSE 每收到一段数据是一次独立的宏任务，React 的自动批处理作用域是单次微任务刷新，
 跨宏任务无法合并。因此需要把增量累积后在 `requestAnimationFrame` 中一帧提交一次。
+
+### 自由对话的上下文记忆
+
+每次发送时，页面会把最近最多 20 条有效的用户和助理消息一起发给模型，因此助理可以基于当前页面会话的前文继续追问。上下文只保存在页面状态中，刷新页面后不会恢复；跨刷新或跨设备保存需要另接持久化存储。
 
 ### 为什么降级是终态而不是错误态
 

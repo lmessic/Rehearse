@@ -1,17 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { createSseParser } from "@/lib/sse";
+import { SSEClient } from "@/lib/sse-client";
 import MarkdownStream from "./MarkdownStream";
 
 /**
  * 流式作答面板。
  *
  * 这一版包含三件核心能力：
- *   1. 手写 SSE 帧解析（半包、UTF-8 截断、保活帧、坏帧容错）；
+ *   1. 使用共享 SSEClient 解析 SSE 帧并处理连接重试；
  *   2. rAF 合批——chunk 累积到 ref，一帧只提交一次 setState，
  *      否则 200 个 chunk 就是 200 次渲染；
- *   3. 可中断——AbortController 断开后服务端能感知并停止调用模型。
+ *   3. 可中断——关闭 SSEClient 后服务端能感知断开并停止调用模型。
  *
  * 完整的状态机（迁移表、非法迁移断言、降级与埋点）留到 W3。
  */
@@ -35,10 +35,12 @@ const PHASE_LABEL: Record<Phase, string> = {
 
 const PHASE_STYLE: Record<Phase, string> = {
   idle: "bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-300",
-  preparing: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
+  preparing:
+    "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
   streaming: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300",
   done: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300",
-  cancelled: "bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300",
+  cancelled:
+    "bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300",
   failed: "bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300",
 };
 
@@ -54,7 +56,8 @@ export default function StreamAnswer({ question }: { question: string }) {
   const [ttft, setTtft] = useState<number | null>(null);
   const [elapsed, setElapsed] = useState<number | null>(null);
 
-  const abortRef = useRef<AbortController | null>(null);
+  const clientRef = useRef<SSEClient | null>(null);
+  const cancelledRef = useRef(false);
   const pendingRef = useRef("");
   const rafRef = useRef<number | null>(null);
   const mountedRef = useRef(true);
@@ -84,7 +87,7 @@ export default function StreamAnswer({ question }: { question: string }) {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
-      abortRef.current?.abort();
+      clientRef.current?.close();
       if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
     };
   }, []);
@@ -95,9 +98,8 @@ export default function StreamAnswer({ question }: { question: string }) {
   async function start() {
     if (!canStart) return;
 
-    abortRef.current?.abort();
-    const controller = new AbortController();
-    abortRef.current = controller;
+    clientRef.current?.close();
+    cancelledRef.current = false;
 
     setPhase("preparing");
     setOutput("");
@@ -110,33 +112,19 @@ export default function StreamAnswer({ question }: { question: string }) {
     let firstByteAt: number | null = null;
     let failedByFrame = false;
 
-    try {
-      const response = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json; charset=utf-8" },
-        body: JSON.stringify({
-          messages: [
-            {
-              role: "user",
-              content: `简历里的项目问题：${question}\n\n候选人的回答：\n${answer}`,
-            },
-          ],
-        }),
-        signal: controller.signal,
-      });
-
-      if (!response.ok || !response.body) {
-        const payload = (await response.json().catch(() => null)) as
-          | { error?: { code?: string; message?: string } }
-          | null;
-        throw new Error(
-          payload?.error?.message ?? `请求失败（HTTP ${response.status}）`,
-        );
-      }
-
-      const reader = response.body.getReader();
-
-      const parse = createSseParser((frame) => {
+    const client = new SSEClient({
+      url: "/api/chat",
+      method: "POST",
+      headers: { "Content-Type": "application/json; charset=utf-8" },
+      body: JSON.stringify({
+        messages: [
+          {
+            role: "user",
+            content: `简历里的项目问题：${question}\n\n候选人的回答：\n${answer}`,
+          },
+        ],
+      }),
+      onFrame(frame) {
         if (frame.t === "delta") {
           if (firstByteAt === null) {
             firstByteAt = performance.now();
@@ -154,24 +142,22 @@ export default function StreamAnswer({ question }: { question: string }) {
           setError({ code: frame.code, message: frame.message });
           setPhase("failed");
         }
-      });
+      },
+    });
+    clientRef.current = client;
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        parse(value);
-      }
+    try {
+      await client.connect();
 
-      flushNow();
-      if (!failedByFrame && mountedRef.current) {
+      if (mountedRef.current) flushNow();
+      if (cancelledRef.current && mountedRef.current) {
+        setPhase("cancelled");
+      } else if (!failedByFrame && mountedRef.current) {
         setPhase((prev) => (prev === "failed" ? prev : "done"));
       }
     } catch (err) {
-      flushNow();
-      const name = (err as Error)?.name;
-      if (name === "AbortError") {
-        if (mountedRef.current) setPhase("cancelled");
-      } else if (mountedRef.current) {
+      if (mountedRef.current) flushNow();
+      if (mountedRef.current) {
         setError({
           code: "UPSTREAM_ERROR",
           message: (err as Error)?.message ?? "网络请求失败",
@@ -182,12 +168,13 @@ export default function StreamAnswer({ question }: { question: string }) {
       if (mountedRef.current) {
         setElapsed(Math.round(performance.now() - startedAt));
       }
-      if (abortRef.current === controller) abortRef.current = null;
+      if (clientRef.current === client) clientRef.current = null;
     }
   }
 
   function stop() {
-    abortRef.current?.abort();
+    cancelledRef.current = true;
+    clientRef.current?.close();
   }
 
   return (
@@ -237,16 +224,12 @@ export default function StreamAnswer({ question }: { question: string }) {
             </button>
           )}
 
-          <span
-            className={`rounded px-2 py-0.5 text-xs ${PHASE_STYLE[phase]}`}
-          >
+          <span className={`rounded px-2 py-0.5 text-xs ${PHASE_STYLE[phase]}`}>
             {PHASE_LABEL[phase]}
           </span>
 
           {ttft !== null && (
-            <span className="text-xs text-slate-400">
-              首字 {ttft} ms
-            </span>
+            <span className="text-xs text-slate-400">首字 {ttft} ms</span>
           )}
           {elapsed !== null && (
             <span className="text-xs text-slate-400">总计 {elapsed} ms</span>

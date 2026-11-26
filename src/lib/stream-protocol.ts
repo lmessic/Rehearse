@@ -37,6 +37,10 @@ export function isStreamFrame(value: unknown): value is StreamFrame {
   if (typeof value !== "object" || value === null) return false;
   const t = (value as { t?: unknown }).t;
   return (
-    t === "meta" || t === "delta" || t === "usage" || t === "done" || t === "error"
+    t === "meta" ||
+    t === "delta" ||
+    t === "usage" ||
+    t === "done" ||
+    t === "error"
   );
 }
